@@ -1,8 +1,7 @@
 logs/
-plugins/
 config/airflow.cfg
 
-.venv
+.venv/
 .env
 
 __pycache__/
