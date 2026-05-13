@@ -19,6 +19,7 @@ docker compose up airflow-init
 ```
 docker compose up -d
 ```
+5. Logowanie przy pomocy loginu i hasła z .env pod adresem: http://localhost:8080/login
 
 ### Uruchomienie ETL dla danego zakresu czasu
 ```
