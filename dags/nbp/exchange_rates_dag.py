@@ -9,27 +9,77 @@ from pathlib import Path
 import pandas as pd
 import pendulum
 import requests
+from typing import List, Optional
 
 class StorageClient(ABC):
     @abstractmethod
-    def save(self, data: bytes, target: str):
+    def save(self, data: bytes, file_path: str):
+        """Saves raw bytes data to the specified path."""
         pass
     
     @abstractmethod
-    def file_exists(self, target: str) -> bool:
+    def load(self, file_path: str) -> bytes:
+        """Loads raw bytes data from the specified file path."""
+        pass
+
+    @abstractmethod
+    def file_exists(self, file_path: str) -> bool:
+        """Checks if a file exists at specified path."""
+        pass
+
+    @abstractmethod
+    def save_df(self, df: pd.DataFrame, file_path: str, partition_cols: Optional[List[str]] = None, **kwargs):
+        """
+        Saves a pandas DataFrame to the specified path based on file extension.
+        Supports partitioning for Parquet files via pyarrow.
+        """
         pass
 
 
 class LocalStorageClient(StorageClient):
-    def save(self, data: bytes, target: str):
-        path = Path(target)
+    def save(self, data: bytes, file_path: str):
+        """Saves raw bytes data to the specified path."""
+        path = Path(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "wb") as f:
             f.write(data)
 
-    def file_exists(self, target: str) -> bool:
-        return Path(target).exists()
+    def load(self, file_path: str) -> bytes:
+        """Loads raw bytes data from the specified file path."""
+        if not self.file_exists(file_path):
+            raise AirflowFailException(f"Specified file: {file_path} does not exist")
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return file.read()
+        
+
+    def file_exists(self, file_path: str) -> bool:
+        """Checks if a file exists at the given path."""
+        return Path(file_path).exists()
+    
+    def save_df(self, df: pd.DataFrame, file_path: str, partition_cols: Optional[List[str]] = None, **kwargs):
+        """
+        Saves a pandas DataFrame to the specified path based on file extension.
+        Supports partitioning for Parquet files via pyarrow.
+        """
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        extension = path.suffix.lower()
+
+        if extension == ".parquet":
+            if partition_cols:
+                df.to_parquet(
+                    file_path,
+                    engine="pyarrow",
+                    index=False,
+                    partition_cols=partition_cols,
+                    existing_data_behavior="overwrite_or_ignore", 
+                    **kwargs
+                )
+            else:
+                df.to_parquet(file_path, engine="pyarrow", index=False, **kwargs)
+        else: # More file formats handling can be added here in the future if needed
+            raise ValueError(f"Unsupported file extension: {extension}")
 
 logger = logging.getLogger("airflow.task")
 
@@ -53,7 +103,7 @@ def exchange_rates_dag():
         max_retry_delay=timedelta(hours=1)
     )
     def download_rates_to_bronze(ds: str) -> str:
-        """Fetches XML exchange rates for a given date from NBP API and saves them to the Bronze layer.
+        """Fetches XML exchange rates for a logical date from NBP API and saves them to the Bronze layer.
 
         :param ds: The logical date provided by Airflow (YYYY-MM-DD string).
         :return: The generated file path where the raw XML data was written.
@@ -80,12 +130,28 @@ def exchange_rates_dag():
         return xml_file_path
 
     @task
-    def cleanup_rates_to_silver(xml_file_path: str):
+    def cleanup_rates_to_silver(xml_file_path: str, ds: str):
         SILVER_LOCATION = Variable.get("SILVER_LOCATION", default_var='/opt/airflow/data/silver')
 
         storage_client = LocalStorageClient()
-        if not storage_client.file_exists(xml_file_path):
-            raise AirflowFailException(f"Bronze layer file missing: {xml_file_path}")
+        
+        logger.info(f"Loading raw exchange rates data from Bronze layer: {xml_file_path}")
+        xml_data = storage_client.load(xml_file_path)
+
+        meta_df = pd.read_xml(xml_data, xpath=".//ExchangeRatesTable")
+        try:
+            effective_date = meta_df['EffectiveDate'][0]
+            table_number = meta_df['No'][0]
+        except KeyError as e:
+            raise AirflowFailException(f"Missing expected metadata fields in XML: {e}")
+
+        if effective_date != ds:
+            raise AirflowFailException(f"Effective date in bronze layer XML file ({effective_date}) does not match expected date ({ds})")
+        
+        rates_df = pd.read_xml(xml_data, xpath=".//Rate")
+        rates_df = rates_df.rename(columns={'Currency': 'currency_name', 'Code': 'currency_code', 'Mid': 'exchange_rate_to_pln'})
+        rates_df['effective_date'] = effective_date
+        rates_df['table_number'] = table_number
 
     bronze_layer = download_rates_to_bronze()
     silver_layer = cleanup_rates_to_silver(bronze_layer)
