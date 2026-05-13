@@ -7,11 +7,15 @@
 ```
 cp .env.example .env
 ```
-2. Inicjalizacja bazy danych Airflow
+2. Zbudowanie obrazu na podstawie oficjalnego obrazu Airflow
+```
+docker compose build
+```
+3. Inicjalizacja bazy danych Airflow
 ```
 docker compose up airflow-init
 ```
-3. Uruchomienie środowiska
+4. Uruchomienie środowiska
 ```
 docker compose up -d
 ```
