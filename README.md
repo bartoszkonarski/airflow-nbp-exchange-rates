@@ -37,7 +37,9 @@ Zgodnie z wytycznymi zadania, dane w warstwie Silver są przygotowane pod integr
 
 Wybór kolumny effective_date dokonany został ze względu na charakterystykę danych w postaci szeregu czasowego. Partcjonowanie takie pozwala na partition pruning w przypadku gdy zapytania analityczne filtrują dane po dacie (np. ```WHERE effective_date BETWEEN '2025-10-01' AND '2025-10-31'```). Dzięki temu, BigQuery ignoruje foldery spoza tego zakresu skutecznie zmniejszając wolumen skanowanych danych, tym samym koszt (w przeciwieństwie np. do Snowflake, częścią kosztu zapytania jest wolumen skanowanych danych) oraz czas odpowiedzi.
 
-Partycjonowanie po logicznej dacie uruchomienia (ds) sprawia, że proces jest odporny na przetwarzanie danych przy nownych uruchomieniach dla tej samej daty oraz re-runach zakończonych już dag runów. Uruchomienie DAG-a dla określonego dnia nadpisuje zawartość tylko jednego jednoznacznie określonego katalogu partycji, co eliminuje ryzyko duplikacji danych i minimalizuje czas zapisu (szczególnie w przypadku magazynowych usług chmurowych).
+Partycjonowanie po logicznej dacie uruchomienia (ds) sprawia, że proces jest odporny na przetwarzanie danych przy nownych uruchomieniach dla tej samej daty oraz re-runach zakończonych już DAG runów. Uruchomienie DAG-a dla określonego dnia nadpisuje zawartość tylko jednego jednoznacznie określonego katalogu partycji, co eliminuje ryzyko duplikacji danych i minimalizuje czas zapisu (szczególnie w przypadku magazynowych usług chmurowych). 
+
+Niemniej jednak partycjonowanie danych o tak małym wolumenie może przynieść skutek odwrotny od zamierzonego w przypadku odczytu całego datasetu (problem małych plików).
 
 ### Wybór źródła danych NBP
 Zadanie wskazywało stronę WWW jako źródło informacji o kursach walut. Podjąłem decyzję o wykorzystaniu zamiast tego oficjalnego publicznego API (https://api.nbp.pl/), o którym informacje znalazłem na wskazanej stronie NBP.
