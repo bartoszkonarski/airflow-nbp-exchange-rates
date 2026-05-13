@@ -34,25 +34,37 @@ class LocalStorageClient(StorageClient):
 logger = logging.getLogger("airflow.task")
 
 @dag(
-    dag_id='exchange_rates_etl',
-    schedule_interval="0 7 * * *",
+    schedule="0 7 * * *",
     start_date=pendulum.datetime(2026, 5, 1, tz="Europe/Warsaw"),
     catchup=True,
     tags=["nbp"]
 )
-def nbp_exchange_rates_dag():
+def exchange_rates_dag():
+    """### NBP Exchange Rates ETL DAG
+
+    This process fetches daily exchange rates from the National Bank of Poland
+    (NBP) public API, stores the raw XML payload into the Bronze storage layer, then
+    process the data and saves it to the Silver layer parquet files.
+    """
     @task(
         retries=3, 
         retry_delay=timedelta(minutes=15),
         retry_exponential_backoff=True,
         max_retry_delay=timedelta(hours=1)
     )
-    def download_rates_to_bronze(ds):
-        BRONZE_LOCATION = Variable.get("BRONZE_LOCATION", default_var='/opt/airflow/data/bronze')
-        NBP_API_BASE_URL = Variable.get("NBP_API_BASE_URL", default_var="https://api.nbp.pl/api/exchangerates/tables/A")
+    def download_rates_to_bronze(ds: str) -> str:
+        """Fetches XML exchange rates for a given date from NBP API and saves them to the Bronze layer.
 
-        logger.info(f"Fetching exchange rates from NBP API: {NBP_API_BASE_URL}/{ds}")
-        response = requests.get(f"{NBP_API_BASE_URL}/{ds}/?format=xml")
+        :param ds: The logical date provided by Airflow (YYYY-MM-DD string).
+        :return: The generated file path where the raw XML data was written.
+        """
+        BRONZE_LOCATION = Variable.get("BRONZE_LOCATION", default_var='/opt/airflow/data/bronze')
+        NBP_API_BASE_URL = Variable.get("NBP_API_BASE_URL", default_var="https://api.nbp.pl/api")
+
+        exchange_rates_url = f"{NBP_API_BASE_URL}/exchangerates/tables/a/{ds}/?format=xml"
+
+        logger.info(f"Fetching exchange rates from NBP API: {exchange_rates_url}")
+        response = requests.get(exchange_rates_url)
         if response.status_code == 404:
             raise AirflowSkipException(f"No exchange rates data available for date: {ds} (Rates are not published on weekends and bank holidays)")
         
@@ -80,4 +92,4 @@ def nbp_exchange_rates_dag():
 
     bronze_layer >> silver_layer
 
-nbp_exchange_rates_dag()
+exchange_rates_dag()
